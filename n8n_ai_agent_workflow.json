@@ -1,0 +1,216 @@
+{
+  "name": "Smart Career Autonomous AI Agent (Full Read & Write Sync)",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "node-chat-trigger",
+      "name": "When chat message received",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.chatInput }}",
+        "options": {
+          "systemMessage": "Tum 'Smart Career' platform ke Autonomous AI Career Counselor aur Recruiter Copilot ho.\n\nLIVE DATABASE & TOOLS:\n1. 'Google_Sheets_Jobs_Database' (READ Tool):\n   - Active vacancies aur seats quota dekhne ke liye use karo.\n2. 'Save_Application_To_Sheets' (WRITE Tool):\n   - Jab candidate kisi job ke liye apply kare ya resume evaluate ho, to candidate ka data Google Sheet me save karne ke liye is tool ko call karo.\n3. 'Match_Algorithm_Tool':\n   - 50-30-20 match score calculate karne ke liye.\n4. 'Gemini_Deep_Resume_Auditor':\n   - Deep ATS audit ke liye Google Gemini ko call karta hai.\n\nLANGUAGE RULE:\n- Always match the user's language (English me ho to English, Roman Urdu me ho to Roman Urdu)!"
+        }
+      },
+      "id": "node-ai-agent",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "model": "qwen/qwen3.8-27b",
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 500
+        }
+      },
+      "id": "node-groq-model",
+      "name": "Groq Chat Model (Core Brain)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        300,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 10
+      },
+      "id": "node-memory",
+      "name": "Window Buffer Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        440,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "name": "google_sheets_jobs_database",
+        "description": "READ: Fetches live active jobs directory and seats quota from Google Sheets.",
+        "url": "https://docs.google.com/spreadsheets/d/1eOV3WaGNpkc0yoyzf1pNUgjJpl_m0YO_-xa_5Ro3y5k/gviz/tq?tqx=out:csv&sheet=Jobs_Directory",
+        "method": "GET",
+        "options": {}
+      },
+      "id": "node-tool-sheets-read",
+      "name": "Google_Sheets_Jobs_Database",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [
+        580,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "name": "save_application_to_sheets",
+        "description": "WRITE: Automatically saves and appends a new applicant record (name, email, department, match_percentage, ats_score, status) into the live Google Sheet Candidate_Applications tab.",
+        "url": "https://script.google.com/macros/s/AKfycbxSz05G6-PC73W6YkQWdjuCI3iUURiHnIotQx0jvzkb4bGT5WDZOKxxRKzoj5Ao67yPvw/exec",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\": \"application\",\n  \"name\": $fromAI(\"candidate_name\", \"Anonymous Candidate\"),\n  \"email\": $fromAI(\"candidate_email\", \"applicant@smartcareer.pk\"),\n  \"department\": $fromAI(\"department\", \"IT\"),\n  \"match_percentage\": $fromAI(\"match_percentage\", \"90%\"),\n  \"ats_score\": $fromAI(\"ats_score\", \"85\"),\n  \"status\": \"Shortlisted\"\n}",
+        "options": {}
+      },
+      "id": "node-tool-sheets-write",
+      "name": "Save_Application_To_Sheets",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "name": "calculate_job_match",
+        "description": "Calculates candidate-job match percentage using the 50-30-20 weighted formula (50% Skills, 30% Exp, 20% Edu).",
+        "jsCode": "const skills = $fromAI('skills_score', 80, 'number');\nconst exp = $fromAI('experience_score', 70, 'number');\nconst edu = $fromAI('education_score', 100, 'number');\n\nconst finalScore = Math.round((skills * 0.50) + (exp * 0.30) + (edu * 0.20));\nreturn { final_match_percentage: finalScore, breakdown: { skills: skills * 0.5, exp: exp * 0.3, edu: edu * 0.2 } };"
+      },
+      "id": "node-tool-match-calc",
+      "name": "Match_Algorithm_Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1.1,
+      "position": [
+        860,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "name": "gemini_deep_resume_auditor",
+        "description": "Calls Google Gemini for deep cognitive resume analysis, 6-section ATS audit (Contact, Skills, Exp, Edu, Projects, Format), and actionable improvement tips.",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={{$env.GEMINI_API_KEY}}",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"Tum Smart Career ke Senior ATS Auditor ho. Is profile/resume ka 6-sections deep diagnostic analysis karo aur 84/100 score ke improvement tips do: \" + $fromAI(\"resume_text\", \"Full Stack Developer with React and Node.js\")\n    }]\n  }]\n}",
+        "options": {}
+      },
+      "id": "node-tool-gemini",
+      "name": "Gemini_Deep_Resume_Auditor",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [
+        1000,
+        520
+      ]
+    }
+  ],
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model (Core Brain)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Window Buffer Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google_Sheets_Jobs_Database": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save_Application_To_Sheets": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match_Algorithm_Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini_Deep_Resume_Auditor": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,28 @@
+# Environment variables
+.env
+.env*.local
+
+# Python cache & build
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+
+# n8n local runtime database & logs
+n8n_data/
+*.sqlite
+*.log
+
+# Shared files local directory
+shared_files/*
+!shared_files/.gitkeep
+
+# IDEs & System files
+.vscode/
+.idea/
+.DS_Store
