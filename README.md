@@ -51,6 +51,9 @@ Combines fast statistical token matching with deep dense semantic vector embeddi
 ```text
 AI_features_python/
 ├── docker-compose.yml          # Container configuration for autonomous n8n agent
+├── train_resume_model.py       # Train custom spaCy NER (SKILL, DEGREE, JOB_TITLE, ORG)
+├── custom_nlp/                 # Gazetteer, EntityRuler, inference wrapper
+├── models/smart_career_ner/    # Saved trained model (created after training)
 ├── main.py                     # FastAPI server & ATS endpoint controllers
 ├── resume_nlp_pipeline.py      # Core NLP engine: spaCy, TF-IDF, PyMuPDF, sentence-transformers
 ├── requirements.txt            # Python dependencies (FastAPI, Groq, PyMuPDF, scikit-learn)
@@ -69,6 +72,7 @@ AI_features_python/
 | `GET` | `/` | Health check, engine uptime, and active AI model names. |
 | `POST` | `/api/evaluate-resume-file` | Multipart upload (PDF/DOCX) + job criteria for deep ATS scoring. |
 | `POST` | `/api/evaluate-resume-text` | JSON payload with resume raw text + job description for instant matching. |
+| `GET` | `/api/nlp-model` | Custom spaCy NER status, labels, and last training F1/precision/recall. |
 | `GET` | `/api/benchmark-departments` | Sample evaluation payloads across IT, Healthcare, Engineering, and Finance. |
 | `GET` | `/docs` | Interactive OpenAPI Swagger UI documentation. |
 
@@ -100,6 +104,9 @@ source venv/bin/activate
 ```bash
 pip install -r requirements.txt
 python -m spacy download en_core_web_sm
+
+# Train the custom resume NER (EntityRuler + statistical NER)
+python train_resume_model.py
 ```
 
 ### 3. Configure Environment Variables

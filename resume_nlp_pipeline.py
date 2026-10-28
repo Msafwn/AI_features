@@ -689,6 +689,15 @@ class ResumeNLPPipeline:
         self.matcher = MathFeatureMatcher()
         self.scorer = WeightedScoringEngine()
         self.feedback_engine = SmartFeedbackGenerator()
+        self._custom_ner = None
+
+    @property
+    def custom_ner(self):
+        if self._custom_ner is None:
+            from custom_nlp.resume_ner import CustomResumeNER
+
+            self._custom_ner = CustomResumeNER()
+        return self._custom_ner
 
     def process_resume(
         self,
@@ -722,8 +731,18 @@ class ResumeNLPPipeline:
             Strong problem-solving skills, unit testing, and performance optimization.
             """
 
-        # 2. Multi-Department Skill Taxonomy & Extraction
-        extracted_skills = self.taxonomy.extract_and_normalize_skills(raw_text)
+        # 2. Custom spaCy NER (SKILL/DEGREE/JOB_TITLE/ORG) + taxonomy fallback
+        ner_extraction = self.custom_ner.extract(raw_text)
+        taxonomy_skills = self.taxonomy.extract_and_normalize_skills(raw_text)
+        merged_skills = []
+        seen_skill_keys = set()
+        for skill in list(ner_extraction.get("skills") or []) + taxonomy_skills:
+            key = skill.strip().lower()
+            if not key or key in seen_skill_keys:
+                continue
+            seen_skill_keys.add(key)
+            merged_skills.append(skill)
+        extracted_skills = merged_skills
 
         # 3. spaCy Section Segmentation
         sections = self.segmenter.segment_resume(raw_text)
@@ -752,6 +771,15 @@ class ResumeNLPPipeline:
             "score_breakdown": score_breakdown,
             "extracted_skills": extracted_skills,
             "skills_count": len(extracted_skills),
+            "custom_nlp": {
+                "engine": ner_extraction.get("engine"),
+                "degrees": ner_extraction.get("degrees") or [],
+                "job_titles": ner_extraction.get("job_titles") or [],
+                "organizations": ner_extraction.get("organizations") or [],
+                "entity_count": ner_extraction.get("entity_count", 0),
+                "entities": ner_extraction.get("entities") or [],
+                "model": self.custom_ner.info(),
+            },
             "mathematical_match": math_match,
             "sections_analysis": section_audits,
             "ai_feedback": feedback,

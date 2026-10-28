@@ -18,6 +18,9 @@ n8n_data/
 *.sqlite
 *.log
 
+# Training cache (trained model in models/smart_career_ner is kept)
+models/training_examples.jsonl
+
 # Shared files local directory
 shared_files/*
 !shared_files/.gitkeep
@@ -26,3 +29,4 @@ shared_files/*
 .vscode/
 .idea/
 .DS_Store
+data/raw/
