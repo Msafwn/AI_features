@@ -337,6 +337,12 @@ def run_benchmark():
             "candidate": "Sara Khan",
             "resume": "Financial Analyst specializing in Financial Modeling, Advanced Excel, Power BI, QuickBooks, SQL, Auditing. BBA Finance.",
             "job": "Financial Analyst needed for multi-currency modeling, Power BI dashboarding, and QuickBooks accounting."
+        },
+        {
+            "dept": "Healthcare & Medical",
+            "candidate": "Dr. Ayesha Malik",
+            "resume": "Clinical Pharmacist and Medical Officer at Shifa International Hospital. Skilled in Patient Care, Clinical Diagnostics, Pharmacology, CPR, Infection Control, EMR. Pharm-D and MBBS graduate.",
+            "job": "Hospital Pharmacist and Medical Officer needed with expertise in Patient Care, Pharmacology, Clinical Diagnostics, and CPR. Pharm-D or MBBS required."
         }
     ]
 

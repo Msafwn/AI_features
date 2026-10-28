@@ -20,6 +20,8 @@ import urllib.request
 import urllib.error
 from typing import Dict, List, Any, Optional
 
+from custom_nlp.gazetteer import SKILL_ALIASES, DEGREES, JOB_TITLES, ORGS
+
 # Core NLP & ML Libraries
 import pymupdf
 import docx
@@ -98,9 +100,16 @@ class ResumeTextExtractor:
 # 2. MULTI-DEPARTMENT TAXONOMY & SYNONYM NORMALIZER
 # ======================================================================================
 class MultiDeptTaxonomy:
-    """Normalizes department-specific technical skills, degrees, and common aliases."""
+    """Normalizes department-specific technical skills, degrees, and common aliases from gazetteer."""
 
-    SYNONYM_MAP = {
+    # Dynamic Single Source of Truth from custom_nlp.gazetteer
+    SYNONYM_MAP: Dict[str, str] = {}
+    for _canonical, _aliases in SKILL_ALIASES.items():
+        SYNONYM_MAP[_canonical.lower()] = _canonical
+        for _alias in _aliases:
+            SYNONYM_MAP[_alias.lower()] = _canonical
+
+    _LEGACY_SYNONYMS = {
         # CS / IT
         "react": "React",
         "react.js": "React",
@@ -553,7 +562,7 @@ class MathFeatureMatcher:
 class WeightedScoringEngine:
     """
     Computes deterministic, reproducible composite ATS score:
-      Final Score = (0.50 * Skills Match) + (0.30 * Experience & Checklist) + (0.20 * Education)
+      Final Score = (0.50 * Skills Overlap Match) + (0.30 * Experience & Diagnostics) + (0.20 * Education Match)
     """
 
     @classmethod
@@ -561,31 +570,41 @@ class WeightedScoringEngine:
         cls,
         math_match: Dict[str, Any],
         section_audits: List[Dict[str, Any]],
-        candidate_skills: List[str]
+        candidate_skills: List[str],
+        job_skills: List[str] = None,
+        candidate_degrees: List[str] = None,
+        job_description: str = ""
     ) -> Dict[str, Any]:
         
-        # 1. Skills Component (50%)
-        # Blend of TF-IDF Cosine Match + Raw Skill Count saturation
-        skill_math_score = math_match.get("match_percentage", 50.0)
-        skill_count_bonus = min(len(candidate_skills) * 8.0, 100.0)
-        skills_score = (skill_math_score * 0.6) + (skill_count_bonus * 0.4)
-        skills_score = min(max(skills_score, 30.0), 98.0)
+        # 1. Skills Component (50%): Real NLP overlap ratio between candidate skills and required skills
+        if job_skills and len(job_skills) > 0:
+            matched_skills = [s for s in candidate_skills if s in job_skills]
+            overlap_ratio = len(matched_skills) / len(job_skills)
+            # TF-IDF Cosine similarity serves as subtle fractional tie-breaker
+            cos_sim = float(math_match.get("cosine_similarity", 0.5) or 0.5)
+            skills_score = min(98.0, max(35.0, (overlap_ratio * 88.0) + (cos_sim * 10.0) + 2.0))
+        else:
+            # Satiation based on candidate skills richness
+            skills_score = min(98.0, max(45.0, len(candidate_skills) * 9.5))
 
         # 2. Experience & Diagnostic Completeness Component (30%)
         exp_audit = next((s for s in section_audits if "Experience" in s["title"]), None)
         format_audit = next((s for s in section_audits if "Readability" in s["title"]), None)
-        exp_score = (exp_audit["score"] if exp_audit else 70) * 0.7 + (format_audit["score"] if format_audit else 80) * 0.3
+        exp_score = (exp_audit["score"] if exp_audit else 75) * 0.7 + (format_audit["score"] if format_audit else 80) * 0.3
 
-        # 3. Education Component (20%)
+        # 3. Education Component (20%): Degree presence & department alignment
         edu_audit = next((s for s in section_audits if "Education" in s["title"]), None)
-        edu_score = edu_audit["score"] if edu_audit else 80
+        edu_score = float(edu_audit["score"] if edu_audit else 80)
+        if candidate_degrees and len(candidate_degrees) > 0:
+            edu_score = max(edu_score, 88.0)
 
-        # Weighted calculation
+        # Weighted calculation: 50% Skills + 30% Experience + 20% Education
         composite_score = round(
             (0.50 * skills_score) +
             (0.30 * exp_score) +
             (0.20 * edu_score)
         )
+        composite_score = min(98, max(35, composite_score))
 
         return {
             "overall_ats_score": composite_score,
@@ -753,8 +772,22 @@ class ResumeNLPPipeline:
         # 5. Mathematical TF-IDF & Cosine Similarity Match
         math_match = self.matcher.compute_similarity(raw_text, job_description)
 
-        # 6. 50-30-20 Weighted Score Engine
-        score_breakdown = self.scorer.calculate_score(math_match, section_audits, extracted_skills)
+        # Extract required skills from target job description
+        job_skills = self.taxonomy.extract_and_normalize_skills(job_description)
+        job_ner = self.custom_ner.extract(job_description)
+        for js in job_ner.get("skills") or []:
+            if js not in job_skills:
+                job_skills.append(js)
+
+        # 6. 50-30-20 Weighted Score Engine (Skills Overlap + Experience + Education)
+        score_breakdown = self.scorer.calculate_score(
+            math_match=math_match,
+            section_audits=section_audits,
+            candidate_skills=extracted_skills,
+            job_skills=job_skills,
+            candidate_degrees=ner_extraction.get("degrees") or [],
+            job_description=job_description
+        )
 
         # 7. Cognitive AI Smart Feedback
         feedback = self.feedback_engine.generate_feedback(
