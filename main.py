@@ -13,6 +13,9 @@ Endpoints:
 
 import os
 import shutil
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+load_dotenv()
 import tempfile
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
@@ -109,9 +112,9 @@ def root_health_check():
             "2. Custom spaCy NER: SKILL / DEGREE / JOB_TITLE / ORG (EntityRuler + trained model)",
             "3. Section Segmentation: spaCy (en_core_web_sm)",
             "4. 6-Section Diagnostic Audit: Contact, Skills, Exp, Edu, Projects, Readability",
-            "5. Classical ML Math: scikit-learn TF-IDF + Cosine Vector Distance",
-            "6. Deep Learning: Hugging Face (sentence-transformers/all-MiniLM-L6-v2)",
-            "7. Cognitive AI: Groq Llama-3.3-70b / Gemini Flash"
+            "5. Classical ML Math: scikit-learn TF-IDF n-gram (1, 2) + Cosine Vector Distance",
+            "6. 50-30-20 Deterministic Scoring: 50% Skills + 30% Experience + 20% Education",
+            "7. Cognitive AI Feedback: Groq Llama-3.3-70b / Google Gemini 1.5 Flash (with offline expert fallback)"
         ],
         "custom_nlp_model": pipeline.custom_ner.info(),
         "swagger_docs_url": "/docs",
@@ -130,18 +133,20 @@ async def evaluate_resume_file(
     Extracts text, segments 6 core sections, performs TF-IDF cosine distance matching,
     calculates 50-30-20 weighted ATS score, and generates smart AI recommendations.
     """
-    filename = file.filename or "resume.pdf"
-    extension = os.path.splitext(filename)[1].lower()
+    raw_name = file.filename or "resume.pdf"
+    clean_filename = os.path.basename(raw_name)
+    clean_filename = re.sub(r"[^a-zA-Z0-9_\-\.]", "_", clean_filename)
+    extension = os.path.splitext(clean_filename)[1].lower()
 
     if extension not in [".pdf", ".docx", ".doc", ".txt"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file format '{extension}'. Allowed: .pdf, .docx, .txt"
+            detail=f"Unsupported file format '{extension}'. Allowed: .pdf, .docx, .doc, .txt"
         )
 
     # Save to a secure temporary file
     temp_dir = tempfile.gettempdir()
-    temp_file_path = os.path.join(temp_dir, f"smart_career_{os.getpid()}_{filename}")
+    temp_file_path = os.path.join(temp_dir, f"smart_career_{os.getpid()}_{clean_filename}")
 
     try:
         with open(temp_file_path, "wb") as buffer:
@@ -357,8 +362,10 @@ def run_benchmark():
             "department": p["dept"],
             "candidate": p["candidate"],
             "overall_ats_score": res["overall_ats_score"],
+            "sub_scores": res.get("score_breakdown", {}).get("sub_scores", {}),
             "cosine_similarity": res["mathematical_match"]["cosine_similarity"],
             "extracted_skills": res["extracted_skills"],
+            "extracted_degrees": res.get("custom_nlp", {}).get("degrees", []),
             "ai_summary": res["ai_feedback"]["summary"]
         })
 
@@ -374,95 +381,345 @@ def run_benchmark():
 # --------------------------------------------------------------------------------------
 @app.post("/api/interview-prep/questions", tags=["Interview Prep"])
 def generate_interview_questions(payload: InterviewQuestionsRequest):
-    """Generates 10 structured Technical, Behavioral, and Situational questions for a role."""
+    """Generates 10 structured Technical, Behavioral, and Situational questions for a role across 4 departments."""
     role = payload.role
     skills = payload.skills or []
     dept = (payload.department or "it").lower()
 
     skills_str = ", ".join(skills[:4]) if skills else "relevant industry competencies"
 
-    questions = [
-        {
-            "id": 1,
-            "type": "Technical",
-            "difficulty": "Medium",
-            "question": f"How do you architect and structure a production-ready application for {role}? Explain your design decisions and state/data management approach.",
-            "sampleHints": "Discuss modular architecture, state management, API boundary contracts, and separation of concerns.",
-            "idealAnswer": f"For {role}, I follow a clean modular architecture separating presentational layers, business logic controllers, and data services. I enforce strict typing, centralized error handling, and caching to ensure horizontal scalability."
-        },
-        {
-            "id": 2,
-            "type": "Technical",
-            "difficulty": "Medium",
-            "question": f"When working with {skills_str}, how do you ensure high performance, minimize latency, and prevent memory bottlenecks?",
-            "sampleHints": "Mention profiling, lazy loading, debouncing, database query indexing, and resource cleanups.",
-            "idealAnswer": "I profile critical code paths, implement asynchronous non-blocking workflows, optimize database queries with selective projection and indexing, and avoid memory leaks by managing lifecycle unsubscriptions."
-        },
-        {
-            "id": 3,
-            "type": "Technical",
-            "difficulty": "Hard",
-            "question": f"Explain the security best practices and compliance standards you enforce when deploying solutions in {role}.",
-            "sampleHints": "Cover authentication (JWT dual-cookie), CSRF, input validation, encryption at rest and in transit.",
-            "idealAnswer": "I enforce stateless dual-cookie JWT authentication (HttpOnly SameSite Strict), sanitize all inputs with schema validators, enable CORS whitelisting, and apply TLS 1.3 encryption for data in transit."
-        },
-        {
-            "id": 4,
-            "type": "Technical",
-            "difficulty": "Medium",
-            "question": f"Describe your testing strategy (Unit, Integration, and End-to-End) for critical features in {role}.",
-            "sampleHints": "Mention testing pyramids, mocking external services, automated regression suites, and CI pipelines.",
-            "idealAnswer": "I adhere to the testing pyramid: comprehensive unit tests for core utilities and business rules, integration tests with mocked external APIs, and smoke E2E tests in the CI/CD pipeline prior to production deployment."
-        },
-        {
-            "id": 5,
-            "type": "Technical",
-            "difficulty": "Medium",
-            "question": f"How do you handle schema migrations, database transactions, and data integrity in scalable backends?",
-            "sampleHints": "Discuss ACID compliance, migration scripts, rollback plans, and zero-downtime deployments.",
-            "idealAnswer": "I manage database schema evolutions using automated, versioned migration scripts with backward-compatible column transitions, ensuring zero-downtime rolling updates and transaction rollbacks on failure."
-        },
-        {
-            "id": 6,
-            "type": "Behavioral",
-            "difficulty": "Medium",
-            "question": "Tell me about a high-stakes technical or operational challenge you encountered in a recent project. How did you overcome it?",
-            "sampleHints": "Apply STAR framework: Situation, Task, Action taken, and measurable positive Result.",
-            "idealAnswer": "In a previous project facing high latency under peak traffic, I isolated slow database queries using execution profiling, added compound indexes and Redis caching, reducing response times by 40%."
-        },
-        {
-            "id": 7,
-            "type": "Behavioral",
-            "difficulty": "Medium",
-            "question": "Describe a scenario where you had a strong disagreement with a team member or stakeholder regarding a technical decision. How did you resolve it?",
-            "sampleHints": "Focus on data-driven benchmarking, constructive communication, and alignment on shared business goals.",
-            "idealAnswer": "I created a sandbox proof-of-concept benchmarking both proposed architectures with empirical performance and maintenance metrics, leading to consensus aligned with our business roadmap."
-        },
-        {
-            "id": 8,
-            "type": "Behavioral",
-            "difficulty": "Medium",
-            "question": "How do you prioritize competing deadlines and manage context-switching when unexpected urgent production defects arise?",
-            "sampleHints": "Discuss impact/urgency matrix, stakeholder communication, root-cause containment, and post-mortems.",
-            "idealAnswer": "I triage using an impact/urgency matrix: contain the immediate production incident, communicate estimated remediation timelines to stakeholders, deploy a patch, and schedule non-urgent deliverables accordingly."
-        },
-        {
-            "id": 9,
-            "type": "Situational",
-            "difficulty": "Hard",
-            "question": "Your production environment experiences sudden intermittent failures under 3x regular traffic. What is your systematic triage procedure?",
-            "sampleHints": "Mention monitoring logs, health check probes, isolating microservices, scaling up instances, and rollbacks.",
-            "idealAnswer": "I immediately inspect centralized logs and APM metrics to isolate whether the bottleneck is database connection pooling, CPU exhaustion, or third-party API latency. I scale instances, enable rate-limiting, and deploy a rollback if triggered by a recent release."
-        },
-        {
-            "id": 10,
-            "type": "Situational",
-            "difficulty": "Hard",
-            "question": "You discover a critical security vulnerability or data exposure in a legacy codebase right before a major release. How do you respond?",
-            "sampleHints": "Assess blast radius, halt unsafe release, apply hotfix, verify with security tests, and report to management.",
-            "idealAnswer": "I assess the blast radius and pause the release pipeline. I draft an immediate targeted hotfix with security test cases, notify engineering leadership with a transparent risk assessment, and only proceed once verified."
-        }
-    ]
+    if any(k in dept for k in ["med", "health", "pharm"]):
+        questions = [
+            {
+                "id": 1,
+                "type": "Technical",
+                "difficulty": "Medium",
+                "question": f"In your role as {role}, how do you conduct comprehensive clinical evaluations and diagnostic reviews for complex patient presentations?",
+                "sampleHints": "Discuss patient history taking, differential diagnosis, vital signs assessment, and clinical documentation.",
+                "idealAnswer": f"For {role}, I perform a systematic clinical review beginning with detailed patient history, baseline vitals, and evidence-based differential diagnosis before prescribing or recommending clinical protocols."
+            },
+            {
+                "id": 2,
+                "type": "Technical",
+                "difficulty": "Medium",
+                "question": f"When administering or monitoring {skills_str}, how do you evaluate drug interactions, therapeutic windows, and adverse reactions?",
+                "sampleHints": "Mention pharmacokinetics, renal/hepatic clearance adjustments, therapeutic drug monitoring, and pharmacovigilance reporting.",
+                "idealAnswer": "I review complete patient medication profiles, calculate renal clearance (CrCl) to adjust dosages, monitor high-risk therapeutic windows, and document potential contraindications or ADRs immediately in EMR."
+            },
+            {
+                "id": 3,
+                "type": "Technical",
+                "difficulty": "Hard",
+                "question": "What stringent infection control and sterile handling protocols do you enforce to prevent hospital-acquired infections (HAI)?",
+                "sampleHints": "Cover CDC/WHO aseptic guidelines, PPE compliance, sterilization validation, and antimicrobial stewardship.",
+                "idealAnswer": "I adhere to strict aseptic techniques and WHO hand-hygiene moments, ensure standard autoclave/chemical sterilization logs are maintained, and champion antimicrobial stewardship to minimize resistant pathogens."
+            },
+            {
+                "id": 4,
+                "type": "Technical",
+                "difficulty": "Medium",
+                "question": "How do you maintain patient confidentiality and compliance with HIPAA and healthcare regulatory frameworks when documenting Electronic Medical Records (EMR)?",
+                "sampleHints": "Discuss role-based access control, secure charting practices, encrypted communications, and audit trails.",
+                "idealAnswer": "I ensure patient data is documented exclusively inside authenticated EMR workstations with automatic timeout locking, never sharing credentials, and following minimum necessary disclosure guidelines under HIPAA."
+            },
+            {
+                "id": 5,
+                "type": "Technical",
+                "difficulty": "Medium",
+                "question": "Describe your protocol when initiating Cardiopulmonary Resuscitation (CPR) or managing a code blue emergency resuscitation.",
+                "sampleHints": "Mention BLS/ACLS sequence: airway, breathing, circulation, defibrillation, chest compression rate, and adrenaline dosage.",
+                "idealAnswer": "Following AHA ACLS protocols, I immediately call the code blue team, verify responsiveness and carotid pulse, initiate high-quality chest compressions at 100-120 bpm, secure airway oxygenation, and attach defibrillator pads."
+            },
+            {
+                "id": 6,
+                "type": "Behavioral",
+                "difficulty": "Medium",
+                "question": "Describe a scenario where an anxious patient or their family was resistant to a critical medical procedure or medication. How did you handle it?",
+                "sampleHints": "Apply empathy, active listening, clear plain-language risk/benefit explanations, and shared decision-making.",
+                "idealAnswer": "I held a private consultation with the patient and family, actively listening to their concerns. I explained the clinical rationale in plain terms without medical jargon, walked through safety safeguards, which eased their apprehension and gained informed consent."
+            },
+            {
+                "id": 7,
+                "type": "Behavioral",
+                "difficulty": "Medium",
+                "question": "Tell me about a time you noticed an inconsistency or potential error in a clinical order or physician prescription. How did you resolve it collaboratively?",
+                "sampleHints": "Focus on patient safety first, professional diplomatic communication, and cross-verification.",
+                "idealAnswer": "I cross-verified the patient's lab renal markers against the prescribed antibiotic dose and spotted a 2x overdose. I contacted the prescribing physician politely, presented the lab findings, and agreed on a modified safe dosage."
+            },
+            {
+                "id": 8,
+                "type": "Behavioral",
+                "difficulty": "Medium",
+                "question": "How do you manage stress and emotional fatigue during prolonged high-volume emergency shifts or traumatic patient losses?",
+                "sampleHints": "Discuss emotional resilience, structured clinical debriefs, team support, and disciplined personal decompression.",
+                "idealAnswer": "I rely on systematic clinical prioritization during the shift, participate in interdisciplinary debrief sessions to process clinical events, and maintain clear boundaries outside work through wellness routines."
+            },
+            {
+                "id": 9,
+                "type": "Situational",
+                "difficulty": "Hard",
+                "question": "An admitted patient experiences sudden respiratory distress and anaphylaxis 5 minutes after an IV infusion. What is your immediate step-by-step action plan?",
+                "sampleHints": "Mention stopping infusion immediately, emergency adrenaline/epinephrine IM, airway stabilization, high-flow oxygen, calling code team.",
+                "idealAnswer": "I immediately clamp and discontinue the IV infusion, maintain airway with 100% high-flow oxygen, administer intramuscular Epinephrine (1:1000) into anterolateral thigh, alert the emergency rapid response team, and monitor vitals continuously."
+            },
+            {
+                "id": 10,
+                "type": "Situational",
+                "difficulty": "Hard",
+                "question": "During a massive casualty influx, ICU bed capacity is exhausted. How do you triage patient admissions ethically and effectively?",
+                "sampleHints": "Discuss objective clinical triage scoring (SOFA / APACHE), multidisciplinary ethics committee consultation, and transparent communication.",
+                "idealAnswer": "I implement hospital-approved crisis standard of care triage using objective physiological criteria (SOFA score), consult the senior clinical ethics panel, prioritize patients with highest likelihood of acute recovery, and provide dedicated palliative care."
+            }
+        ]
+    elif any(k in dept for k in ["eng", "civil", "mech", "elect"]):
+        questions = [
+            {
+                "id": 1,
+                "type": "Technical",
+                "difficulty": "Medium",
+                "question": f"How do you approach 3D modeling, geometric dimensioning, and tolerance (GD&T) analysis for {role} designs using CAD software?",
+                "sampleHints": "Discuss ASME Y14.5 standards, datum references, stack-up analysis, and manufacturability constraints (DFM).",
+                "idealAnswer": f"For {role}, I establish standardized datum reference frames, apply appropriate positional and profile tolerances under ASME Y14.5, and run worst-case stack-up tolerance analyses to guarantee assembleability and cost-effective machining."
+            },
+            {
+                "id": 2,
+                "type": "Technical",
+                "difficulty": "Medium",
+                "question": f"When conducting Finite Element Analysis (FEA) or structural simulation with {skills_str}, how do you ensure mesh convergence and boundary condition accuracy?",
+                "sampleHints": "Mention mesh refinement, element types (tetrahedral vs hexahedral), singularities, and validation against theoretical closed-form calculations.",
+                "idealAnswer": "I verify that boundary constraints accurately represent physical fixtures, perform mesh sensitivity convergence studies until strain energy stabilizes under 2% variance, and correlate simulation results with analytical beam or plate equations."
+            },
+            {
+                "id": 3,
+                "type": "Technical",
+                "difficulty": "Hard",
+                "question": "Explain how you incorporate safety factors (FoS) and relevant industrial codes (ASTM, ISO, ACI, ASME) into your design deliverables.",
+                "sampleHints": "Discuss yield vs ultimate tensile criteria, cyclic fatigue limits, environmental degradation, and code mandated safety minimums.",
+                "idealAnswer": "I establish safety factor minimums based on code mandates (e.g. 1.5 to 2.5 on yield), account for cyclic fatigue Goodman diagrams and environmental corrosion allowances, ensuring robust structural margins without excessive mass."
+            },
+            {
+                "id": 4,
+                "type": "Technical",
+                "difficulty": "Medium",
+                "question": "What criteria and methodologies do you utilize when selecting engineering materials for high-stress or corrosive operating environments?",
+                "sampleHints": "Discuss Ashby material selection charts, strength-to-weight ratios, galvanic corrosion, thermal expansion coefficients, and life-cycle costs.",
+                "idealAnswer": "I utilize Ashby selection charts matching yield strength, fracture toughness, thermal expansion compatibility, and galvanic potential against operating temperatures and corrosive media, balancing performance against raw material cost."
+            },
+            {
+                "id": 5,
+                "type": "Technical",
+                "difficulty": "Medium",
+                "question": "How do you implement Quality Control (QC) and Six Sigma DMAIC methodology to eliminate fabrication defects on the production line?",
+                "sampleHints": "Discuss Define, Measure, Analyze, Improve, Control phases, Gage R&R, control charts, and root-cause Ishikawa diagrams.",
+                "idealAnswer": "I apply DMAIC: measure process capability (Cp/Cpk), isolate root cause using Ishikawa fishbone diagrams, implement poka-yoke (mistake-proofing) tooling, and monitor statistical process control charts to prevent defect drift."
+            },
+            {
+                "id": 6,
+                "type": "Behavioral",
+                "difficulty": "Medium",
+                "question": "Describe a situation where you had to convey critical engineering limitations or safety risks to non-technical project managers or stakeholders.",
+                "sampleHints": "Focus on data visualization, business impact, liability explanation, and proactive alternative solutions.",
+                "idealAnswer": "When management requested compressing wall thicknesses to save costs, I presented side-by-side FEA stress concentration charts demonstrating catastrophic burst risk, then proposed an alternative lightweight alloy that met both budget and safety requirements."
+            },
+            {
+                "id": 7,
+                "type": "Behavioral",
+                "difficulty": "Medium",
+                "question": "Tell me about a high-consequence design or structural challenge that arose late in a project schedule. How did you resolve it?",
+                "sampleHints": "Apply STAR framework: Situation, Task, Action taken, and measurable engineering outcome.",
+                "idealAnswer": "During pre-commissioning vibration testing, resonance occurred near motor operating frequencies. I rapidly redesigned external stiffener gussets, validated with modal FEA, shifted natural frequency by 35Hz, and passed inspection without project delays."
+            },
+            {
+                "id": 8,
+                "type": "Behavioral",
+                "difficulty": "Medium",
+                "question": "How do you coordinate with on-site contractors, machinists, and field technicians when discrepancies arise between drawings and physical builds?",
+                "sampleHints": "Discuss collaborative site walkthroughs, Request for Information (RFI) workflows, engineering change orders (ECO), and mutual respect.",
+                "idealAnswer": "I inspect the field condition directly with the machinist, evaluate whether an on-site concession or shim maintains structural integrity, and issue a formalized Engineering Change Order (ECO) to maintain updated revision logs."
+            },
+            {
+                "id": 9,
+                "type": "Situational",
+                "difficulty": "Hard",
+                "question": "During physical prototype pressure or load testing, a structural component fractures at only 75% of design load. What is your systematic failure investigation plan?",
+                "sampleHints": "Mention isolating fracture origin, fractography (cleavage vs fatigue), material coupon testing, FEA model auditing, and corrective action.",
+                "idealAnswer": "I preserve the fracture surfaces without cleaning, initiate metallurgical fractography under SEM to determine whether failure was brittle cleavage or micro-void coalescence, verify mill test certificates for material composition, and audit boundary constraint stiffness."
+            },
+            {
+                "id": 10,
+                "type": "Situational",
+                "difficulty": "Hard",
+                "question": "You discover a major subcontractor used uncertified structural steel or components on an active installation. How do you respond?",
+                "sampleHints": "Halt installation immediately, issue non-conformance report (NCR), test sample coupons, notify safety officer, require certified replacement.",
+                "idealAnswer": "I issue an immediate Stop Work Notice and Non-Conformance Report (NCR) for the affected section, quarantine the materials, extract coupon samples for destructive tensile testing, and mandate certified replacement at subcontractor cost before release."
+            }
+        ]
+    elif any(k in dept for k in ["bus", "fin", "acc", "econ"]):
+        questions = [
+            {
+                "id": 1,
+                "type": "Technical",
+                "difficulty": "Medium",
+                "question": f"How do you build and structure a dynamic 3-statement financial model and DCF valuation for {role} decision-making?",
+                "sampleHints": "Discuss linking Income Statement, Balance Sheet, and Cash Flow Statement, working capital schedules, WACC, and terminal value calculation.",
+                "idealAnswer": f"For {role}, I construct a dynamic 3-statement model where net income feeds cash flow and changes in working capital balance the balance sheet. For DCF, I forecast unlevered free cash flows, discount by WACC, and apply sensitivity tables across terminal exit multiples."
+            },
+            {
+                "id": 2,
+                "type": "Technical",
+                "difficulty": "Medium",
+                "question": f"When utilizing {skills_str}, how do you automate variance analysis between budgeted projections and actual financial performance?",
+                "sampleHints": "Mention Power Query, DAX measures, automated ETL, price-volume mix analysis, and dynamic variance waterfall charts.",
+                "idealAnswer": "I build automated Power BI / Power Query pipelines that ingest GL ledger actuals, compute DAX variance metrics (Actual vs Budget vs Prior Year), and decompose revenue/cost fluctuations into volume, rate, and FX mix variances."
+            },
+            {
+                "id": 3,
+                "type": "Technical",
+                "difficulty": "Hard",
+                "question": "Explain the key differences between GAAP and IFRS regarding revenue recognition (IFRS 15 / ASC 606) and lease accounting (IFRS 16 / ASC 842).",
+                "sampleHints": "Discuss 5-step revenue recognition model, operating vs finance lease balance sheet recognition, and right-of-use (ROU) assets.",
+                "idealAnswer": "Under both ASC 606 and IFRS 15, revenue is recognized through a 5-step model when control transfers. For leases under IFRS 16, all leases are recognized on-balance sheet as ROU assets and lease liabilities with single amortization/interest, whereas US GAAP retains dual classification."
+            },
+            {
+                "id": 4,
+                "type": "Technical",
+                "difficulty": "Medium",
+                "question": "How do you evaluate working capital health, cash conversion cycles (CCC), and liquidity stress scenarios?",
+                "sampleHints": "Discuss Days Sales Outstanding (DSO), Days Inventory Outstanding (DIO), Days Payable Outstanding (DPO), and operating cash flow buffers.",
+                "idealAnswer": "I compute Cash Conversion Cycle = DSO + DIO - DPO. I stress-test receivables aging and supplier payment terms to ensure minimum liquidity buffers survive 60-day delayed collections without emergency credit line drawing."
+            },
+            {
+                "id": 5,
+                "type": "Technical",
+                "difficulty": "Medium",
+                "question": "What internal control frameworks (e.g. COSO) and segregation of duties do you enforce to safeguard assets and prevent financial fraud?",
+                "sampleHints": "Mention maker-checker authorizations, automated bank reconciliations, access rights segregation, and whistleblowing controls.",
+                "idealAnswer": "I enforce dual authorization for all disbursements over threshold, separate invoice creation from payment approval, mandate daily automated ERP bank reconciliations, and establish periodic independent audit trails."
+            },
+            {
+                "id": 6,
+                "type": "Behavioral",
+                "difficulty": "Medium",
+                "question": "Describe a scenario where financial modeling or data analysis revealed an unprofitable product line or business initiative. How did you present this to management?",
+                "sampleHints": "Focus on objective data presentation, cost allocation clarity, margin waterfall analysis, and actionable pivot strategies.",
+                "idealAnswer": "I presented an activity-based costing analysis demonstrating that high return rates and customer acquisition costs eroded gross margins into negative 12% EBITDA. I framed the presentation with actionable alternatives, prompting a successful pricing restructuring."
+            },
+            {
+                "id": 7,
+                "type": "Behavioral",
+                "difficulty": "Medium",
+                "question": "Tell me about a high-pressure month-end or fiscal year-end financial close where unexpected discrepancies threatened deadlines.",
+                "sampleHints": "Apply STAR framework: Situation, Task, Action taken, and measurable successful close.",
+                "idealAnswer": "During fiscal year close, an unrecorded $400K intercompany transit entry caused balance sheet imbalance. I isolated the unposted journal, coordinated between regional treasury controllers, posted corrective adjusting entries, and finalized audit schedules on time."
+            },
+            {
+                "id": 8,
+                "type": "Behavioral",
+                "difficulty": "Medium",
+                "question": "How do you handle pushback from department heads when mandating strict budget cuts or tighter expense control policies?",
+                "sampleHints": "Discuss collaborative zero-based budgeting, transparent communication, ROI-based prioritization, and win-win compromises.",
+                "idealAnswer": "Instead of imposing arbitrary top-down cuts, I partnered with each department head to review non-performing discretionary spend and software redundancies, preserving core headcount and customer-facing growth drivers."
+            },
+            {
+                "id": 9,
+                "type": "Situational",
+                "difficulty": "Hard",
+                "question": "A sudden 15% currency devaluation hits your supply chain 48 hours before an executive board presentation. What is your immediate financial contingency plan?",
+                "sampleHints": "Mention currency hedging exposure assessment, repricing elasticity analysis, renegotiating FX supplier terms, and revised forecast scenarios.",
+                "idealAnswer": "I immediately quantify net FX transaction exposure, calculate the COGS margin compression, assess forward derivative coverage, and prepare three sensitivity scenarios (Optimistic, Base, Pessimistic) with selective price increases and hedging adjustments for the board."
+            },
+            {
+                "id": 10,
+                "type": "Situational",
+                "difficulty": "Hard",
+                "question": "During an internal audit, you uncover evidence of intentional revenue pull-forward or off-the-books liabilities. What is your protocol?",
+                "sampleHints": "Document evidence immutably, notify Audit Committee / Chief Compliance Officer, protect confidentiality, ensure restatement integrity.",
+                "idealAnswer": "I secure and preserve documentary evidence without altering audit logs, escalate confidentially to the Audit Committee chair and Internal Audit Director per whistleblower protocol, and assist independent forensic review to determine whether restatement is required."
+            }
+        ]
+    else:
+        questions = [
+            {
+                "id": 1,
+                "type": "Technical",
+                "difficulty": "Medium",
+                "question": f"How do you architect and structure a production-ready application for {role}? Explain your design decisions and state/data management approach.",
+                "sampleHints": "Discuss modular architecture, state management, API boundary contracts, and separation of concerns.",
+                "idealAnswer": f"For {role}, I follow a clean modular architecture separating presentational layers, business logic controllers, and data services. I enforce strict typing, centralized error handling, and caching to ensure horizontal scalability."
+            },
+            {
+                "id": 2,
+                "type": "Technical",
+                "difficulty": "Medium",
+                "question": f"When working with {skills_str}, how do you ensure high performance, minimize latency, and prevent memory bottlenecks?",
+                "sampleHints": "Mention profiling, lazy loading, debouncing, database query indexing, and resource cleanups.",
+                "idealAnswer": "I profile critical code paths, implement asynchronous non-blocking workflows, optimize database queries with selective projection and indexing, and avoid memory leaks by managing lifecycle unsubscriptions."
+            },
+            {
+                "id": 3,
+                "type": "Technical",
+                "difficulty": "Hard",
+                "question": f"Explain the security best practices and compliance standards you enforce when deploying solutions in {role}.",
+                "sampleHints": "Cover authentication (JWT dual-cookie), CSRF, input validation, encryption at rest and in transit.",
+                "idealAnswer": "I enforce stateless dual-cookie JWT authentication (HttpOnly SameSite Strict), sanitize all inputs with schema validators, enable CORS whitelisting, and apply TLS 1.3 encryption for data in transit."
+            },
+            {
+                "id": 4,
+                "type": "Technical",
+                "difficulty": "Medium",
+                "question": f"Describe your testing strategy (Unit, Integration, and End-to-End) for critical features in {role}.",
+                "sampleHints": "Mention testing pyramids, mocking external services, automated regression suites, and CI pipelines.",
+                "idealAnswer": "I adhere to the testing pyramid: comprehensive unit tests for core utilities and business rules, integration tests with mocked external APIs, and smoke E2E tests in the CI/CD pipeline prior to production deployment."
+            },
+            {
+                "id": 5,
+                "type": "Technical",
+                "difficulty": "Medium",
+                "question": "How do you handle schema migrations, database transactions, and data integrity in scalable backends?",
+                "sampleHints": "Discuss ACID compliance, migration scripts, rollback plans, and zero-downtime deployments.",
+                "idealAnswer": "I manage database schema evolutions using automated, versioned migration scripts with backward-compatible column transitions, ensuring zero-downtime rolling updates and transaction rollbacks on failure."
+            },
+            {
+                "id": 6,
+                "type": "Behavioral",
+                "difficulty": "Medium",
+                "question": "Tell me about a high-stakes technical or operational challenge you encountered in a recent project. How did you overcome it?",
+                "sampleHints": "Apply STAR framework: Situation, Task, Action taken, and measurable positive Result.",
+                "idealAnswer": "In a previous project facing high latency under peak traffic, I isolated slow database queries using execution profiling, added compound indexes and Redis caching, reducing response times by 40%."
+            },
+            {
+                "id": 7,
+                "type": "Behavioral",
+                "difficulty": "Medium",
+                "question": "Describe a scenario where you had a strong disagreement with a team member or stakeholder regarding a technical decision. How did you resolve it?",
+                "sampleHints": "Focus on data-driven benchmarking, constructive communication, and alignment on shared business goals.",
+                "idealAnswer": "I created a sandbox proof-of-concept benchmarking both proposed architectures with empirical performance and maintenance metrics, leading to consensus aligned with our business roadmap."
+            },
+            {
+                "id": 8,
+                "type": "Behavioral",
+                "difficulty": "Medium",
+                "question": "How do you prioritize competing deadlines and manage context-switching when unexpected urgent production defects arise?",
+                "sampleHints": "Discuss impact/urgency matrix, stakeholder communication, root-cause containment, and post-mortems.",
+                "idealAnswer": "I triage using an impact/urgency matrix: contain the immediate production incident, communicate estimated remediation timelines to stakeholders, deploy a patch, and schedule non-urgent deliverables accordingly."
+            },
+            {
+                "id": 9,
+                "type": "Situational",
+                "difficulty": "Hard",
+                "question": "Your production environment experiences sudden intermittent failures under 3x regular traffic. What is your systematic triage procedure?",
+                "sampleHints": "Mention monitoring logs, health check probes, isolating microservices, scaling up instances, and rollbacks.",
+                "idealAnswer": "I immediately inspect centralized logs and APM metrics to isolate whether the bottleneck is database connection pooling, CPU exhaustion, or third-party API latency. I scale instances, enable rate-limiting, and deploy a rollback if triggered by a recent release."
+            },
+            {
+                "id": 10,
+                "type": "Situational",
+                "difficulty": "Hard",
+                "question": "You discover a critical security vulnerability or data exposure in a legacy codebase right before a major release. How do you respond?",
+                "sampleHints": "Assess blast radius, halt unsafe release, apply hotfix, verify with security tests, and report to management.",
+                "idealAnswer": "I assess the blast radius and pause the release pipeline. I draft an immediate targeted hotfix with security test cases, notify engineering leadership with a transparent risk assessment, and only proceed once verified."
+            }
+        ]
 
     return {
         "success": True,
@@ -507,10 +764,10 @@ def evaluate_interview_answer(payload: InterviewEvaluateRequest):
     improvements = []
 
     # Depth & length heuristics
-    if word_count >= 60:
+    if word_count >= 50:
         base_score += 2.0
         strengths.append("Comprehensive depth, technical nuance, and detailed articulation.")
-    elif word_count >= 30:
+    elif word_count >= 25:
         base_score += 1.0
         strengths.append("Good concise explanation covering fundamental concepts.")
     else:
@@ -523,10 +780,10 @@ def evaluate_interview_answer(payload: InterviewEvaluateRequest):
             tfidf = TfidfVectorizer(ngram_range=(1, 2), stop_words="english")
             vecs = tfidf.fit_transform([answer, ideal])
             cosine_sim = compute_cosine_similarity(vecs[0], vecs[1])
-            if cosine_sim >= 0.35:
+            if cosine_sim >= 0.28:
                 base_score += 2.0
                 strengths.append("Strong semantic alignment with hiring manager's expected answer criteria.")
-            elif cosine_sim >= 0.18:
+            elif cosine_sim >= 0.14:
                 base_score += 1.0
                 strengths.append("Addressed core expected keywords and thematic objectives.")
             else:
@@ -553,12 +810,29 @@ def evaluate_interview_answer(payload: InterviewEvaluateRequest):
         else:
             improvements.append("Outline a clear step-by-step incident procedure (Contain -> Isolate -> Resolve -> Verify).")
     else:
-        # Technical terminology
-        tech_terms = ["api", "database", "scale", "performance", "architecture", "security", "cache", "query", "optimize", "async", "index"]
+        # Technical terminology checked across 4 departments
+        dept_norm = dept.lower()
+        if any(d in dept_norm for d in ["medical", "health", "pharma"]):
+            tech_terms = ["patient", "clinical", "diagnosis", "dosage", "treatment", "protocol", "pharmacology", "triage", "therapy", "safety", "infection", "emr", "trial", "cpr", "pathology", "symptom"]
+            domain_label = "Medical & Healthcare"
+        elif any(d in dept_norm for d in ["engineering", "civil", "mech", "elect"]):
+            tech_terms = ["design", "cad", "structural", "analysis", "load", "safety", "standard", "simulation", "fea", "material", "tolerance", "inspection", "maintenance", "autocad", "solidworks", "stress"]
+            domain_label = "Engineering"
+        elif any(d in dept_norm for d in ["business", "finance", "accounting", "commerce"]):
+            tech_terms = ["financial", "audit", "model", "budget", "compliance", "variance", "forecast", "revenue", "cash flow", "gaap", "ifrs", "reporting", "controls", "excel", "power bi", "dcf"]
+            domain_label = "Finance & Business"
+        else:
+            tech_terms = ["api", "database", "scale", "performance", "architecture", "security", "cache", "query", "optimize", "async", "index", "backend", "frontend", "latency"]
+            domain_label = "Software & IT"
+
         matched_tech = sum(1 for tt in tech_terms if tt in text_lower)
         if matched_tech >= 3:
             base_score += 1.0
-            strengths.append("Demonstrated commanding grasp of engineering and architectural vocabulary.")
+            strengths.append(f"Demonstrated commanding grasp of domain-specific {domain_label} vocabulary.")
+        elif matched_tech >= 1:
+            strengths.append(f"Included relevant {domain_label} terminology.")
+        else:
+            improvements.append(f"Include more recognized {domain_label} keywords and standard practices in your answer.")
 
     final_score = int(min(max(round(base_score), 3), 10))
 
