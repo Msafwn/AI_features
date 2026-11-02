@@ -1,5 +1,11 @@
-﻿import re
+import sys
+import re
 from datetime import datetime
+
+# Ensure utf-8 encoding for terminal output (prevents Windows cp1252 emoji crash)
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
 
 def generate_copilot_response(query: str, role: str = "candidate", profile: dict = None):
     q = (query or "").strip()
