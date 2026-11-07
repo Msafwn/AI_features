@@ -114,9 +114,9 @@ def generate_copilot_response(query: str, role: str = "candidate", profile: dict
                 "📐 **Smart Career 50-30-20 AI Match Formula:**\n\n"
                 "Hamara system candidate compatibility calculate karne ke liye yeh formula use karta hai:\n\n"
                 "$$\\text{Total Match Score} = (0.50 \\times \\text{Skills}) + (0.30 \\times \\text{Experience}) + (0.20 \\times \\text{Education})$$\n\n"
-                "• **50% Skills Match:** Candidate ke skills ko TF-IDF Cosine Similarity aur Hugging Face MiniLM dense embeddings se compare karta hai.\n"
+                "• **50% Skills Match:** Candidate ke skills ko Custom spaCy NER, Multi-Dept Gazetteer canonical overlap aur TF-IDF Cosine Similarity se compare karta hai.\n"
                 "• **30% Experience Match:** Job Title relevance aur total working duration evaluate karta hai.\n"
-                "• **20% Education Match:** Degree tier (BS/MS/PhD) aur field of study alignment check karta hai.\n\n"
+                "• **20% Education Match:** Accredited degrees (BS, B.E, Pharm-D, MBBS, BBA, MBA, MS, PhD) aur field alignment check karta hai.\n\n"
                 "Is hybrid approach ki wajah se model 95%+ zero-shot accuracy deta hai."
             )
         else:
@@ -124,9 +124,9 @@ def generate_copilot_response(query: str, role: str = "candidate", profile: dict
                 "📐 **Smart Career 50-30-20 AI Matching Architecture:**\n\n"
                 "Our core scoring pipeline evaluates candidates using the standardized multi-dimensional formula:\n\n"
                 "$$\\text{Total Match Score} = (0.50 \\times \\text{Skills}) + (0.30 \\times \\text{Experience}) + (0.20 \\times \\text{Education})$$\n\n"
-                "• **50% Skills Match:** Evaluates exact & semantic skill alignment using TF-IDF vectorization paired with FastEmbed 384-dimensional dense sentence embeddings.\n"
+                "• **50% Skills Match:** Evaluates exact & canonical skill alignment using Custom spaCy NER + Gazetteer overlap paired with TF-IDF (1, 2) n-gram Cosine Similarity.\n"
                 "• **30% Experience Match:** Calculates semantic role relevance and verified duration.\n"
-                "• **20% Education Match:** Assesses degree tier (BS, MS, PhD) and academic discipline alignment.\n\n"
+                "• **20% Education Match:** Verifies accredited degrees (BS, B.E, Pharm-D, MBBS, BBA, MBA, MS, PhD) via Custom spaCy NER and regex patterns.\n\n"
                 "This eliminates single-variable bias and ensures fair, multi-departmental candidate ranking."
             )
         return {"text": text, "time": current_time}
