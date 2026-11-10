@@ -37,10 +37,15 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# CORS middleware to allow API calls from any client
+# CORS middleware to allow API calls from frontend and backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5000",
+        "http://127.0.0.1:5000"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1005,6 +1010,10 @@ class CopilotChatPayload(BaseModel):
     role: Optional[str] = "candidate"
     profile: Optional[Dict[str, Any]] = None
     history: Optional[List[Dict[str, Any]]] = None
+    company: Optional[str] = "Company"
+    kpiStats: Optional[Dict[str, Any]] = None
+    jobs: Optional[List[Dict[str, Any]]] = None
+    applicants: Optional[List[Dict[str, Any]]] = None
 
 @app.post("/webhook/career-agent", tags=["AI Copilot Agent"])
 @app.post("/api/copilot/chat", tags=["AI Copilot Agent"])
@@ -1074,38 +1083,89 @@ async def handle_copilot_chat(payload: CopilotChatPayload):
                 )
         return {"output": text, "reply": text, "text": text, "time": current_time, "source": "smart_career_fastapi"}
 
-    # 2. SEATS QUOTA
+    # 2. SEATS QUOTA (Dynamic MongoDB metrics with fallback)
     if any(k in c_lower for k in ['seat', 'quota', 'vacancy', 'openings', 'capacity', 'baki']):
-        text = (
-            "🔒 **Internal HR Seats Quota Report (Confidential):**\n\n"
-            "• **Total Allocated Quota:** 12 Seats across all active vacancies\n"
-            "• **Filled / Onboarded:** 5 Seats (42% Capacity)\n"
-            "• **Remaining Openings:** 7 Open Seats\n\n"
-            "**Active Vacancy Breakdown:**\n"
-            "1. **Junior MERN Developer:** 1 / 3 Seats Filled (2 Openings remaining)\n"
-            "2. **Cloud DevOps Intern:** 2 / 4 Seats Filled (2 Openings remaining)\n"
-            "3. **Senior Cloud Architect:** 2 / 5 Seats Filled (3 Openings remaining)\n"
-            "4. **Financial Analyst:** 0 / 2 Seats Filled (2 Openings remaining)\n\n"
-            "*(Note: These confidential quota metrics are protected behind the Recruiter firewall and hidden from candidates.)*"
-        )
+        kpi = payload.kpiStats or {}
+        jobs_list = payload.jobs or []
+        company_name = payload.company or "Company"
+        
+        if kpi or jobs_list:
+            total_seats = kpi.get("totalSeats", sum(int(j.get("openings", 1) or 1) for j in jobs_list) if jobs_list else 0)
+            filled_seats = kpi.get("filledSeats", sum(int(j.get("filledSeats", 0) or 0) for j in jobs_list) if jobs_list else 0)
+            open_vacancies = kpi.get("openVacancies", len([j for j in jobs_list if j.get("status") in ["Active", "Open"]]))
+            util_pct = kpi.get("utilizationPct", round((filled_seats / total_seats * 100) if total_seats > 0 else 0))
+            
+            breakdown_lines = []
+            for idx, j in enumerate(jobs_list[:5], 1):
+                j_title = j.get("title", "Job Role")
+                j_seats = int(j.get("openings", 1) or 1)
+                j_filled = int(j.get("filledSeats", 0) or 0)
+                j_rem = max(0, j_seats - j_filled)
+                breakdown_lines.append(f"{idx}. **{j_title}:** {j_filled} / {j_seats} Seats Filled ({j_rem} Remaining)")
+            
+            breakdown_str = "\n".join(breakdown_lines) if breakdown_lines else "No individual active vacancies recorded yet."
+            
+            text = (
+                f"🔒 **Live HR Seats Quota Report ({company_name}):**\n\n"
+                f"• **Total Allocated Quota:** {total_seats} Seats across active roles\n"
+                f"• **Filled / Onboarded:** {filled_seats} Seats ({util_pct}% Capacity)\n"
+                f"• **Remaining Openings:** {open_vacancies} Open Vacancies\n\n"
+                f"**Active Vacancy Breakdown:**\n"
+                f"{breakdown_str}\n\n"
+                f"*(Note: Confidential quota metrics are protected behind the Recruiter firewall and hidden from candidates.)*"
+            )
+        else:
+            text = (
+                f"🔒 **Internal HR Seats Quota Report ({company_name}):**\n\n"
+                "• **Total Allocated Quota:** 12 Seats across all active vacancies\n"
+                "• **Filled / Onboarded:** 5 Seats (42% Capacity)\n"
+                "• **Remaining Openings:** 7 Open Seats\n\n"
+                "**Active Vacancy Breakdown:**\n"
+                "1. **Junior MERN Developer:** 1 / 3 Seats Filled (2 Openings remaining)\n"
+                "2. **Cloud DevOps Intern:** 2 / 4 Seats Filled (2 Openings remaining)\n"
+                "3. **Senior Cloud Architect:** 2 / 5 Seats Filled (3 Openings remaining)\n"
+                "4. **Financial Analyst:** 0 / 2 Seats Filled (2 Openings remaining)\n\n"
+                "*(Note: Confidential quota metrics are protected behind the Recruiter firewall and hidden from candidates.)*"
+            )
         return {"output": text, "reply": text, "text": text, "time": current_time, "source": "smart_career_fastapi"}
 
-    # 3. SHORTLIST CANDIDATES
+    # 3. SHORTLIST CANDIDATES (Dynamic MongoDB applicants with fallback)
     if any(k in c_lower for k in ['shortlist', 'candidate', 'applicant', 'top match', 'best candidate', 'filter']):
-        text = (
-            "✨ **Top High-Match Applicants Shortlisted (50-30-20 Weighted Engine):**\n\n"
-            "1. **Hamza Tariq (94% AI Match)** — Junior MERN Developer\n"
-            "   • **Strengths:** React 18, Node.js, MongoDB, Express, Git, BS CS (3.8 GPA)\n"
-            "   • **Recommendation:** Top candidate for round 1 technical interview.\n\n"
-            "2. **Ayesha Noor (91% AI Match)** — Cloud DevOps Intern\n"
-            "   • **Strengths:** Linux, Python scripting, Docker containerization, CI/CD interest\n"
-            "   • **Recommendation:** Highly recommended for trainee fellowship.\n\n"
-            "3. **Bilal Ahmed (88% AI Match)** — Junior MERN Developer\n"
-            "   • **Strengths:** 3 completed full-stack production deployments, Tailwind CSS\n\n"
-            "4. **Zainab Fatima (87% AI Match)** — Financial Analyst\n"
-            "   • **Strengths:** Financial modeling, Advanced Excel, Power BI dashboards\n\n"
-            "You can review each applicant's detailed score breakdown in the **Applicants Screening Desk**."
-        )
+        apps = payload.applicants or []
+        company_name = payload.company or "Company"
+        
+        if apps and len(apps) > 0:
+            sorted_apps = sorted(apps, key=lambda a: float(a.get("matchScore") or a.get("matchPercentage") or 0), reverse=True)
+            lines = []
+            for idx, a in enumerate(sorted_apps[:4], 1):
+                name = a.get("name") or a.get("candidateName") or (a.get("applicant", {}).get("name") if isinstance(a.get("applicant"), dict) else "Candidate")
+                score = round(float(a.get("matchScore") or a.get("matchPercentage") or 75))
+                role_applied = a.get("jobTitle") or (a.get("job", {}).get("title") if isinstance(a.get("job"), dict) else "Applied Vacancy")
+                dept = a.get("department") or "General"
+                status_app = a.get("status") or "Pending Review"
+                lines.append(f"{idx}. **{name} ({score}% AI Match)** — {role_applied}\n   • **Discipline:** {dept} | **Status:** {status_app}")
+            
+            top_lines_str = "\n\n".join(lines)
+            text = (
+                f"✨ **Live Top High-Match Applicants Shortlisted ({company_name}):**\n\n"
+                f"{top_lines_str}\n\n"
+                f"You can review each applicant's detailed score breakdown and schedule interviews in the **Applicants Screening Desk**."
+            )
+        else:
+            text = (
+                f"✨ **Top High-Match Applicants Shortlisted ({company_name}):**\n\n"
+                "1. **Hamza Tariq (94% AI Match)** — Junior MERN Developer\n"
+                "   • **Strengths:** React 18, Node.js, MongoDB, Express, Git, BS CS (3.8 GPA)\n"
+                "   • **Recommendation:** Top candidate for round 1 technical interview.\n\n"
+                "2. **Ayesha Noor (91% AI Match)** — Cloud DevOps Intern\n"
+                "   • **Strengths:** Linux, Python scripting, Docker containerization, CI/CD interest\n"
+                "   • **Recommendation:** Highly recommended for trainee fellowship.\n\n"
+                "3. **Bilal Ahmed (88% AI Match)** — Junior MERN Developer\n"
+                "   • **Strengths:** 3 completed full-stack production deployments, Tailwind CSS\n\n"
+                "4. **Zainab Fatima (87% AI Match)** — Financial Analyst\n"
+                "   • **Strengths:** Financial modeling, Advanced Excel, Power BI dashboards\n\n"
+                "You can review each applicant's detailed score breakdown in the **Applicants Screening Desk**."
+            )
         return {"output": text, "reply": text, "text": text, "time": current_time, "source": "smart_career_fastapi"}
 
     # 4. 50-30-20 FORMULA

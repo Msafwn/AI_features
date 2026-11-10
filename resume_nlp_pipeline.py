@@ -495,13 +495,48 @@ class MathFeatureMatcher:
 
 
 # ======================================================================================
-# 6. 50-30-20 WEIGHTED SCORING ENGINE (CANONICAL ALIAS MATCHING)
+# 6. 50-30-20 WEIGHTED SCORING ENGINE (CANONICAL ALIAS MATCHING & DEPT ALIGNMENT)
 # ======================================================================================
 class WeightedScoringEngine:
     """
     Computes deterministic, reproducible composite ATS score:
       Final Score = (0.50 * Skills Overlap Match) + (0.30 * Experience & Diagnostics) + (0.20 * Education Match)
+    Ensures strict discipline discrimination (e.g. Medical degrees on IT roles do not get full credit).
     """
+
+    DEPARTMENT_CRITERIA = {
+        "it": {
+            "keywords": ["software", "developer", "engineer", "react", "node", "python", "computer science", "database", "full stack", "backend", "frontend", "programming", "web"],
+            "degrees": ["bs cs", "bs computer science", "bachelor of science in computer science", "software engineering", "computer engineering", "bs se", "bs it", "ms cs", "ms computer science", "phd computer science"]
+        },
+        "medical": {
+            "keywords": ["patient", "clinical", "pharmacy", "pharmacist", "pharmacology", "hospital", "doctor", "medicine", "cpr", "emr", "healthcare", "nurse", "nursing", "medical"],
+            "degrees": ["pharm-d", "doctor of pharmacy", "mbbs", "bds", "dpt", "fcps", "mcps", "nursing", "bs nursing"]
+        },
+        "engineering": {
+            "keywords": ["mechanical", "civil", "electrical", "autocad", "solidworks", "matlab", "fea", "six sigma", "structural", "etabs", "revit", "design engineer", "cad"],
+            "degrees": ["bs mechanical", "bs civil", "bs electrical", "b.e", "be", "bachelor of engineering", "bs engineering", "ms engineering"]
+        },
+        "business": {
+            "keywords": ["finance", "financial", "accounting", "analyst", "audit", "auditing", "excel", "power bi", "quickbooks", "investment", "portfolio", "banking", "budgeting", "ifrs", "gaap"],
+            "degrees": ["bba", "mba", "m.com", "b.com", "acca", "cfa", "ca", "bs accounting", "bs finance"]
+        }
+    }
+
+    @classmethod
+    def detect_department(cls, text: str) -> str:
+        """Determines target discipline domain from text or credentials."""
+        text_lower = " " + text.lower() + " "
+        scores = {dept: 0 for dept in cls.DEPARTMENT_CRITERIA}
+        for dept, data in cls.DEPARTMENT_CRITERIA.items():
+            for kw in data["keywords"]:
+                if re.search(r"(?<!\w)" + re.escape(kw) + r"(?!\w)", text_lower):
+                    scores[dept] += 1
+            for deg in data["degrees"]:
+                if deg in text_lower:
+                    scores[dept] += 2
+        best = max(scores, key=scores.get)
+        return best if scores[best] > 0 else "general"
 
     @classmethod
     def calculate_score(
@@ -517,27 +552,58 @@ class WeightedScoringEngine:
         # P0: Normalize both candidate and job skills to canonical gazetteer keys
         cand_canon = {MultiDeptTaxonomy.normalize_skill(s).lower() for s in candidate_skills if s and s.strip()}
         job_canon = {MultiDeptTaxonomy.normalize_skill(s).lower() for s in (job_skills or []) if s and s.strip()}
+        cos_sim = float(math_match.get("cosine_similarity", 0.0) or 0.0)
 
         # 1. Skills Component (50%): Real NLP overlap ratio between candidate skills and required skills
         if job_canon and len(job_canon) > 0:
             matched_skills = cand_canon.intersection(job_canon)
             overlap_ratio = len(matched_skills) / len(job_canon)
-            cos_sim = float(math_match.get("cosine_similarity", 0.5) or 0.5)
-            # 50% Skills Score: primary overlap + cosine similarity tie-breaker
-            skills_score = min(98.0, max(35.0, (overlap_ratio * 88.0) + (cos_sim * 10.0) + 2.0))
+            if len(matched_skills) == 0:
+                # Zero skills overlap -> pure baseline derived from minimal cosine similarity (max 20%)
+                skills_score = min(20.0, max(5.0, cos_sim * 25.0))
+            else:
+                # Real overlap: baseline 30 + up to 58 for overlap + up to 10 for cosine similarity
+                skills_score = min(98.0, 30.0 + (overlap_ratio * 58.0) + (cos_sim * 10.0))
         else:
-            skills_score = min(98.0, max(45.0, len(cand_canon) * 9.5))
+            skills_score = min(98.0, max(30.0, len(cand_canon) * 9.0))
 
-        # 2. Experience & Diagnostic Completeness Component (30%)
+        # Detect departments of job vs candidate degree
+        job_dept = cls.detect_department(job_description) if job_description else "general"
+
+        # 2. Experience Component (30%)
         exp_audit = next((s for s in section_audits if "Experience" in s["title"]), None)
         format_audit = next((s for s in section_audits if "Readability" in s["title"]), None)
-        exp_score = (exp_audit["score"] if exp_audit else 75) * 0.75 + (format_audit["score"] if format_audit else 80) * 0.25
+        raw_exp = (exp_audit["score"] if exp_audit else 70) * 0.75 + (format_audit["score"] if format_audit else 80) * 0.25
 
-        # 3. Education Component (20%): Degree presence & department alignment
+        # 3. Education Component (20%): Degree presence + Domain alignment
         edu_audit = next((s for s in section_audits if "Education" in s["title"]), None)
-        edu_score = float(edu_audit["score"] if edu_audit else 80)
-        if candidate_degrees and len(candidate_degrees) > 0:
-            edu_score = max(edu_score, 90.0)
+        raw_edu = float(edu_audit["score"] if edu_audit else 70)
+
+        cand_deg_str = " ".join(candidate_degrees or []).lower()
+        if job_dept != "general":
+            deg_match = False
+            if candidate_degrees:
+                deg_dept = cls.detect_department(cand_deg_str)
+                deg_match = (deg_dept == job_dept)
+
+            if deg_match:
+                edu_score = max(raw_edu, 92.0)
+                exp_score = raw_exp
+            else:
+                # Candidate degree is from an unrelated field (e.g., Pharm-D on a Software job)
+                if candidate_degrees and len(candidate_degrees) > 0:
+                    edu_score = 45.0  # Has higher education, but wrong discipline
+                else:
+                    edu_score = 30.0
+
+                # If zero skills matched as well, candidate experience is in an unrelated discipline
+                if job_canon and len(cand_canon.intersection(job_canon)) == 0:
+                    exp_score = max(35.0, raw_exp * 0.5)
+                else:
+                    exp_score = raw_exp
+        else:
+            edu_score = max(raw_edu, 88.0) if candidate_degrees else raw_edu
+            exp_score = raw_exp
 
         # Weighted calculation: 50% Skills + 30% Experience + 20% Education
         composite_score = round(
@@ -545,7 +611,7 @@ class WeightedScoringEngine:
             (0.30 * exp_score) +
             (0.20 * edu_score)
         )
-        composite_score = min(98, max(35, composite_score))
+        composite_score = min(98, max(20, composite_score))
 
         return {
             "overall_ats_score": composite_score,
