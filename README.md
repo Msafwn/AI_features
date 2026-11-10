@@ -30,7 +30,7 @@ This repository contains the backend AI and Natural Language Processing (NLP) mi
 * Segments and audits **6 fundamental ATS sections**: Contact Links, Core Technical Skills, Work & Internship Tenure, Academic Education & Degrees, Practical Projects, and ATS Readability.
 
 ### 2. 🏷️ Custom Trained spaCy NER + Multi-Department Gazetteer
-* Fine-tuned on **1,410 real annotated resume records** and evaluated on **187 holdout test records** (Precision: **85.1%**, F1: **58.6%**).
+* Fine-tuned on **1,410 real annotated resume records** and evaluated on **187 holdout test records** (holdout Precision: **62.3%**, Recall: **47.7%**, F1: **54.0%**).
 * Extended with a single-source-of-truth `EntityRuler` gazetteer covering **113+ canonical skills**, **36 accredited degrees**, **32 job titles**, and **30 organizations**.
 
 ### 3. 🎯 Deterministic 50-30-20 Weighted ATS Scoring Engine
