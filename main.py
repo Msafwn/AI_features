@@ -1202,9 +1202,9 @@ async def handle_copilot_chat(payload: CopilotChatPayload):
                 "  - Master Pandas data wrangling, Matplotlib/Seaborn visualizations, statistical tests.\n\n"
                 "• **Phase 2 (Days 11-20): Classical Machine Learning with Scikit-Learn**\n"
                 "  - Regression, Random Forests, XGBoost, Cross-Validation, and ROC-AUC metrics.\n\n"
-                "• **Phase 3 (Days 21-30): NLP, Embeddings & Model Deployment**\n"
-                "  - FastEmbed/Sentence-Transformers, vector cosine similarity, FastAPI model deployment.\n\n"
-                "💡 *Capstone Project:* Build an automated resume ranker API using TF-IDF and dense embeddings."
+                "• **Phase 3 (Days 21-30): Custom NLP & Model Deployment**\n"
+                "  - Custom spaCy NER training, TF-IDF cosine similarity, FastAPI model deployment.\n\n"
+                "💡 *Capstone Project:* Build an automated resume ranker API using Custom spaCy NER and TF-IDF cosine matching."
             )
         else:
             text = (
@@ -1226,7 +1226,7 @@ async def handle_copilot_chat(payload: CopilotChatPayload):
             "Here are 3 high-yield conceptual questions frequently asked in technical screenings:\n\n"
             "**Q1:** Explain how React Reconciliation and the Virtual DOM diffing algorithm work. Why are stable keys crucial in lists?\n\n"
             "**Q2:** What is the difference between CPU-bound and I/O-bound asynchronous operations in Node.js?\n\n"
-            "**Q3:** How does our 50-30-20 matching algorithm combine TF-IDF sparse vectors with dense neural embeddings?\n\n"
+            "**Q3:** How does our 50-30-20 matching algorithm combine Custom spaCy NER entity extraction with TF-IDF cosine similarity?\n\n"
             "💬 *Try answering Question 1 right here, and I will evaluate your explanation!*"
         )
         return {"output": text, "reply": text, "text": text, "time": current_time, "source": "smart_career_fastapi"}
