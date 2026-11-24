@@ -11,9 +11,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, Dict, List
+import re
 
-import spacy
-from spacy.language import Language
+try:
+    import spacy
+    from spacy.language import Language
+    SPACY_AVAILABLE = True
+except (ImportError, Exception):
+    spacy = None
+    Language = None
+    SPACY_AVAILABLE = False
 
 from custom_nlp.gazetteer import (
     DEGREES,
@@ -168,16 +175,24 @@ class CustomResumeNER:
             except json.JSONDecodeError:
                 self.metrics = {}
 
-        if self.trained:
-            self.nlp = spacy.load(str(MODEL_DIR))
-            self.source = "trained_smart_career_ner"
-        else:
-            self.nlp = load_base_spacy()
-            attach_entity_ruler(self.nlp)
-            self.source = "entity_ruler_fallback"
+        if SPACY_AVAILABLE:
+            try:
+                if self.trained:
+                    self.nlp = spacy.load(str(MODEL_DIR))
+                    self.source = "trained_smart_career_ner"
+                else:
+                    self.nlp = load_base_spacy()
+                    attach_entity_ruler(self.nlp)
+                    self.source = "entity_ruler_fallback"
 
-        if "smart_career_ruler" not in self.nlp.pipe_names:
-            attach_entity_ruler(self.nlp)
+                if "smart_career_ruler" not in self.nlp.pipe_names:
+                    attach_entity_ruler(self.nlp)
+            except Exception:
+                self.nlp = None
+                self.source = "gazetteer_regex_fallback"
+        else:
+            self.nlp = None
+            self.source = "gazetteer_regex_fallback"
 
     def info(self) -> Dict[str, Any]:
         return {
@@ -186,14 +201,96 @@ class CustomResumeNER:
             "trained": self.trained,
             "model_path": str(MODEL_DIR) if self.trained else None,
             "labels": list(LABELS),
-            "pipe_names": list(self.nlp.pipe_names),
+            "pipe_names": list(self.nlp.pipe_names) if self.nlp else ["regex_matcher"],
             "metrics": self.metrics,
             "note": (
                 "Custom spaCy NER trained on multi-department resume sentences "
                 "with EntityRuler gazetteer for SKILL, DEGREE, JOB_TITLE, ORG."
-                if self.trained
-                else "Trained model not found. Using EntityRuler gazetteer. Run: python train_resume_model.py"
+                if self.trained and SPACY_AVAILABLE
+                else "Using resilient regex gazetteer entity extraction engine."
             ),
+        }
+
+    def _extract_pure_python(self, text: str) -> Dict[str, Any]:
+        skills: List[str] = []
+        degrees: List[str] = []
+        titles: List[str] = []
+        orgs: List[str] = []
+        entities: List[Dict[str, Any]] = []
+
+        seen_skills = set()
+        seen_degrees = set()
+        seen_titles = set()
+        seen_orgs = set()
+
+        for canonical, alias in all_skill_phrases():
+            pattern = r"(?<!\w)" + re.escape(alias) + r"(?!\w)"
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                key = canonical.lower()
+                if key not in seen_skills and _is_plausible_skill(match.group()):
+                    seen_skills.add(key)
+                    skills.append(canonical)
+                    entities.append({
+                        "text": match.group(),
+                        "label": "SKILL",
+                        "start": match.start(),
+                        "end": match.end(),
+                    })
+                    break
+
+        for deg in DEGREES:
+            pattern = r"(?<!\w)" + re.escape(deg) + r"(?!\w)"
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                key = deg.lower()
+                if key not in seen_degrees and _is_plausible_degree(match.group()):
+                    seen_degrees.add(key)
+                    degrees.append(deg)
+                    entities.append({
+                        "text": match.group(),
+                        "label": "DEGREE",
+                        "start": match.start(),
+                        "end": match.end(),
+                    })
+                    break
+
+        for title in JOB_TITLES:
+            pattern = r"(?<!\w)" + re.escape(title) + r"(?!\w)"
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                key = title.lower()
+                if key not in seen_titles and _is_plausible_job_title(match.group()):
+                    seen_titles.add(key)
+                    titles.append(title)
+                    entities.append({
+                        "text": match.group(),
+                        "label": "JOB_TITLE",
+                        "start": match.start(),
+                        "end": match.end(),
+                    })
+                    break
+
+        for org in ORGS:
+            pattern = r"(?<!\w)" + re.escape(org) + r"(?!\w)"
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                key = org.lower()
+                if key not in seen_orgs and _is_plausible_org(match.group()):
+                    seen_orgs.add(key)
+                    orgs.append(org)
+                    entities.append({
+                        "text": match.group(),
+                        "label": "ORG",
+                        "start": match.start(),
+                        "end": match.end(),
+                    })
+                    break
+
+        return {
+            "skills": skills,
+            "degrees": degrees,
+            "job_titles": titles,
+            "organizations": orgs,
+            "entities": entities[:80],
+            "entity_count": len(entities),
+            "engine": self.source,
         }
 
     def extract(self, text: str) -> Dict[str, Any]:
@@ -206,6 +303,9 @@ class CustomResumeNER:
                 "entities": [],
                 "engine": self.source,
             }
+
+        if not SPACY_AVAILABLE or self.nlp is None:
+            return self._extract_pure_python(text)
 
         doc = self.nlp(text[:200000])
         skills: List[str] = []

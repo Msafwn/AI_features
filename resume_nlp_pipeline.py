@@ -27,10 +27,22 @@ load_dotenv()
 
 from custom_nlp.gazetteer import SKILL_ALIASES, DEGREES, JOB_TITLES, ORGS
 
-# Core NLP & ML Libraries
-import pymupdf
-import docx
-import spacy
+# Core NLP & ML Libraries (safe imports with Windows Application Control resilience)
+try:
+    import pymupdf
+except Exception:
+    pymupdf = None
+
+try:
+    import docx
+except Exception:
+    docx = None
+
+try:
+    import spacy
+except Exception:
+    spacy = None
+
 from sklearn.feature_extraction.text import TfidfVectorizer
 import numpy as np
 
@@ -51,13 +63,13 @@ def compute_cosine_similarity(vec1, vec2):
             return 0.0
         return float(np.dot(v1, v2) / (norm1 * norm2))
 
-# Initialize spaCy
-try:
-    nlp = spacy.load("en_core_web_sm")
-except Exception:
-    import spacy.cli
-    spacy.cli.download("en_core_web_sm")
-    nlp = spacy.load("en_core_web_sm")
+# Initialize spaCy with graceful fallback if Python 3.13 / Windows SAC blocks native binary
+nlp = None
+if spacy is not None:
+    try:
+        nlp = spacy.load("en_core_web_sm")
+    except Exception:
+        nlp = None
 
 
 # ======================================================================================
@@ -68,26 +80,41 @@ class ResumeTextExtractor:
 
     @staticmethod
     def extract_from_pdf(pdf_path: str) -> str:
-        """Extract text from PDF using PyMuPDF (fitz)."""
-        doc = pymupdf.open(pdf_path)
-        pages_text = []
-        for page_num in range(len(doc)):
-            page = doc[page_num]
-            pages_text.append(page.get_text("text"))
-        doc.close()
-        return ResumeTextExtractor.clean_text("\n".join(pages_text))
+        """Extract text from PDF using PyMuPDF (fitz) or pypdf fallback."""
+        if pymupdf is not None:
+            try:
+                doc = pymupdf.open(pdf_path)
+                pages_text = []
+                for page_num in range(len(doc)):
+                    page = doc[page_num]
+                    pages_text.append(page.get_text("text"))
+                doc.close()
+                return ResumeTextExtractor.clean_text("\n".join(pages_text))
+            except Exception:
+                pass
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(pdf_path)
+            return ResumeTextExtractor.clean_text("\n".join(page.extract_text() or "" for page in reader.pages))
+        except Exception:
+            return ""
 
     @staticmethod
     def extract_from_docx(docx_path: str) -> str:
         """Extract text from DOCX using python-docx."""
-        doc = docx.Document(docx_path)
-        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-        for table in doc.tables:
-            for row in table.rows:
-                row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
-                if row_text:
-                    paragraphs.append(row_text)
-        return ResumeTextExtractor.clean_text("\n".join(paragraphs))
+        if docx is not None:
+            try:
+                doc = docx.Document(docx_path)
+                paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+                for table in doc.tables:
+                    for row in table.rows:
+                        row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+                        if row_text:
+                            paragraphs.append(row_text)
+                return ResumeTextExtractor.clean_text("\n".join(paragraphs))
+            except Exception:
+                pass
+        return ""
 
     @staticmethod
     def clean_text(raw_text: str) -> str:
@@ -408,8 +435,11 @@ class DiagnosticAuditEngine:
         })
 
         # --- 6. Formatting & ATS Readability ---
-        doc = nlp(full_text[:2000])
-        sentences_count = len(list(doc.sents))
+        if nlp is not None:
+            doc = nlp(full_text[:2000])
+            sentences_count = len(list(doc.sents))
+        else:
+            sentences_count = len([s for s in full_text[:2000].split(".") if s.strip()])
         total_words = len(full_text.split())
 
         if total_words >= 150 and sentences_count >= 8:
